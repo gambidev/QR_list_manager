@@ -33,7 +33,10 @@
                 <button id="back-to-home-btn" class="btn">&larr; Voltar</button>
                 <h2 id="list-name-display" contenteditable="true"></h2>
                 <div class="header-actions">
-                    <button id="export-csv-btn" class="btn">Exportar CSV</button>
+                    <button id="export-csv-btn" class="btn" title="Exportar CSV">📥 Exportar CSV</button>
+                    <button id="send-email-btn" class="btn" title="Enviar por E-mail">📧 Enviar por E-mail</button>
+                    <button id="send-whatsapp-btn" class="btn" title="Enviar por WhatsApp">💬 Enviar por WhatsApp</button>
+                    <button id="list-settings-btn" class="btn" title="Configurações da Lista">⚙️</button>
                 </div>
             </header>
             <main>
@@ -69,11 +72,10 @@
 
     <!-- Modal: Define Columns for a New List -->
     <div id="define-columns-modal" class="modal hidden">
-        <h3>Como deseja definir os campos?</h3>
-        <p>Sua lista ainda não tem colunas. Defina-as para começar a adicionar dados.</p>
+        <h3>Defina os campos da sua lista</h3>
+        <p>Sua lista ainda não tem colunas. Clique abaixo para defini-las manualmente e começar a adicionar dados.</p>
         <div class="modal-actions">
-            <button id="define-cols-manual-btn" class="btn">Definir manualmente</button>
-            <button id="define-cols-qr-btn" class="btn btn-primary">Ler de um QR</button>
+            <button id="define-cols-manual-btn" class="btn btn-primary">Definir campos manualmente</button>
         </div>
     </div>
     
@@ -138,6 +140,56 @@
         <div class="modal-actions">
             <button id="cancel-delete-row-btn" class="btn btn-secondary">Cancelar</button>
             <button id="confirm-delete-row-btn" class="btn btn-danger">Remover</button>
+        </div>
+    </div>
+
+    <!-- Modal: List Settings -->
+    <div id="list-settings-modal" class="modal hidden wide">
+        <h3>Configurações da Lista</h3>
+        <h4>Contato do Destinatário (Opcional)</h4>
+        <div class="settings-form-group">
+            <label for="recipient-name">Nome:</label>
+            <input type="text" id="recipient-name" placeholder="Nome do destinatário">
+        </div>
+        <div class="settings-form-group">
+            <label for="recipient-email">E-mail:</label>
+            <input type="email" id="recipient-email" placeholder="email@exemplo.com">
+        </div>
+        <div class="settings-form-group">
+            <label for="recipient-phone">Nº de Telefone (WhatsApp):</label>
+            <input type="tel" id="recipient-phone" placeholder="5511999998888">
+        </div>
+        <hr>
+        <h4>Integração Google Sheets (Opcional)</h4>
+        <div class="settings-form-group">
+            <label for="google-sheet-url">URL do Web App:</label>
+            <input type="url" id="google-sheet-url" placeholder="https://script.google.com/macros/s/...">
+        </div>
+        <div class="modal-actions">
+            <button id="cancel-list-settings-btn" class="btn btn-secondary">Cancelar</button>
+            <button id="save-list-settings-btn" class="btn btn-primary">Salvar</button>
+        </div>
+    </div>
+
+    <!-- Modal: Prompt for Email -->
+    <div id="prompt-email-modal" class="modal hidden">
+        <h3>E-mail do Destinatário</h3>
+        <p>Por favor, insira o e-mail para envio.</p>
+        <input type="email" id="prompt-email-input" placeholder="email@exemplo.com">
+        <div class="modal-actions">
+            <button id="cancel-prompt-email-btn" class="btn btn-secondary">Cancelar</button>
+            <button id="confirm-prompt-email-btn" class="btn btn-primary">Enviar</button>
+        </div>
+    </div>
+
+    <!-- Modal: Prompt for Phone -->
+    <div id="prompt-phone-modal" class="modal hidden">
+        <h3>Nº de WhatsApp do Destinatário</h3>
+        <p>Insira o número com código do país (Ex: 55119...)</p>
+        <input type="tel" id="prompt-phone-input" placeholder="5511999998888">
+        <div class="modal-actions">
+            <button id="cancel-prompt-phone-btn" class="btn btn-secondary">Cancelar</button>
+            <button id="confirm-prompt-phone-btn" class="btn btn-primary">Enviar</button>
         </div>
     </div>
 

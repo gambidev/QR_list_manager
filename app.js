@@ -16,6 +16,9 @@ const modals = {
     qrScanner: document.getElementById('qr-scanner-modal'),
     qrPreview: document.getElementById('qr-preview-modal'),
     confirmDeleteRow: document.getElementById('confirm-delete-row-modal'),
+    listSettings: document.getElementById('list-settings-modal'),
+    promptEmail: document.getElementById('prompt-email-modal'),
+    promptPhone: document.getElementById('prompt-phone-modal'),
 };
 
 const state = {
@@ -109,12 +112,53 @@ function saveCurrentList() {
     saveState();
 }
 
+async function sendToGoogleSheets(dataArray) {
+    if (!state.currentListId) return;
+    const list = state.lists[state.currentListId];
+    if (!list.googleSheetUrl) return;
+
+    // Create a JSON object from column headers and new row data
+    const payload = {};
+    list.columns.forEach((col, index) => {
+        payload[col] = dataArray[index] !== undefined ? dataArray[index] : '';
+    });
+
+    try {
+        const response = await fetch(list.googleSheetUrl, {
+            method: 'POST',
+            mode: 'no-cors', // Important for simple Apps Script web apps
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                timestamp: new Date().toISOString(),
+                data: payload
+            })
+        });
+        console.log('Data sent to Google Sheets.');
+    } catch (error) {
+        console.error('Error sending data to Google Sheets:', error);
+        // Optionally, inform the user of the failure
+        document.getElementById('last-scan-status').textContent = `Erro ao enviar para o Google Sheets!`;
+    }
+}
+
 function addDataToList(dataArray) {
     if (!state.currentListId) return;
     const list = state.lists[state.currentListId];
-    list.data.push(dataArray);
+    
+    const now = new Date();
+    const date = now.toISOString().split('T')[0]; // YYYY-MM-DD
+    const time = now.toLocaleTimeString('pt-BR'); // HH:MM:SS
+    const rowWithTimestamp = [date, time, ...dataArray];
+
+    list.data.push(rowWithTimestamp);
     renderTable(list.columns, list.data);
     saveCurrentList();
+
+    // Send to Google Sheets if configured (without timestamp)
+    sendToGoogleSheets(dataArray);
+
     const statusText = Array.isArray(dataArray) ? dataArray.join(', ') : dataArray;
     document.getElementById('last-scan-status').textContent = `Última leitura: ${statusText.substring(0, 30)}...`;
 }
@@ -156,6 +200,10 @@ function setupEventListeners() {
                 data: [],
                 createdAt: new Date().toISOString(),
                 modifiedAt: new Date().toISOString(),
+                recipientName: '',
+                recipientEmail: '',
+                recipientPhone: '',
+                googleSheetUrl: '',
             };
             saveState();
             hideAllModals();
@@ -180,6 +228,31 @@ function setupEventListeners() {
         } else {
             e.target.textContent = state.lists[state.currentListId].name; // revert
         }
+    });
+
+    document.getElementById('list-settings-btn').addEventListener('click', () => {
+        const list = state.lists[state.currentListId];
+        if (!list) return;
+
+        document.getElementById('recipient-name').value = list.recipientName || '';
+        document.getElementById('recipient-email').value = list.recipientEmail || '';
+        document.getElementById('recipient-phone').value = list.recipientPhone || '';
+        document.getElementById('google-sheet-url').value = list.googleSheetUrl || '';
+
+        showModal(modals.listSettings);
+    });
+
+    document.getElementById('save-list-settings-btn').addEventListener('click', () => {
+        const list = state.lists[state.currentListId];
+        if (!list) return;
+
+        list.recipientName = document.getElementById('recipient-name').value.trim();
+        list.recipientEmail = document.getElementById('recipient-email').value.trim();
+        list.recipientPhone = document.getElementById('recipient-phone').value.trim();
+        list.googleSheetUrl = document.getElementById('google-sheet-url').value.trim();
+
+        saveCurrentList();
+        hideAllModals();
     });
 
     document.getElementById('read-qr-btn').addEventListener('click', () => {
@@ -218,8 +291,99 @@ function setupEventListeners() {
     document.getElementById('export-csv-btn').addEventListener('click', () => {
         if (!state.currentListId) return;
         const list = state.lists[state.currentListId];
-        exportToCSV(list.name, list.columns, list.data);
+        const columnsWithTimestamp = ['Data', 'Hora', ...list.columns];
+        exportToCSV(list.name, columnsWithTimestamp, list.data);
     });
+
+    document.getElementById('send-email-btn').addEventListener('click', () => {
+        const list = state.lists[state.currentListId];
+        if (!list) return;
+
+        if (list.recipientEmail) {
+            sendEmail(list.recipientEmail);
+        } else {
+            document.getElementById('prompt-email-input').value = '';
+            showModal(modals.promptEmail);
+        }
+    });
+
+    document.getElementById('confirm-prompt-email-btn').addEventListener('click', () => {
+        const email = document.getElementById('prompt-email-input').value.trim();
+        if (email) {
+            sendEmail(email);
+            hideAllModals();
+        } else {
+            alert('Por favor, insira um e-mail válido.');
+        }
+    });
+
+    document.getElementById('send-whatsapp-btn').addEventListener('click', () => {
+        const list = state.lists[state.currentListId];
+        if (!list) return;
+
+        if (list.recipientPhone) {
+            sendWhatsApp(list.recipientPhone);
+        } else {
+            document.getElementById('prompt-phone-input').value = '';
+            showModal(modals.promptPhone);
+        }
+    });
+
+    document.getElementById('confirm-prompt-phone-btn').addEventListener('click', () => {
+        const phone = document.getElementById('prompt-phone-input').value.trim();
+        if (phone) {
+            sendWhatsApp(phone);
+            hideAllModals();
+        } else {
+            alert('Por favor, insira um número válido.');
+        }
+    });
+
+    function getCsvContent() {
+        const list = state.lists[state.currentListId];
+        const columnsWithTimestamp = ['Data', 'Hora', ...list.columns];
+        
+        const header = columnsWithTimestamp.join(',');
+        const rows = list.data.map(row =>
+            row.map(cellValue => {
+                let cell = cellValue === undefined ? '' : String(cellValue);
+                if (cell.includes('"') || cell.includes(',')) {
+                    cell = `"${cell.replace(/"/g, '""')}"`;
+                }
+                return cell;
+            }).join(',')
+        );
+        return [header, ...rows].join('\n');
+    }
+
+    function sendEmail(email) {
+        const list = state.lists[state.currentListId];
+        const columnsWithTimestamp = ['Data', 'Hora', ...list.columns];
+
+        // 1. Download CSV
+        exportToCSV(list.name, columnsWithTimestamp, list.data);
+        
+        // 2. Prepare and open mailto link
+        const subject = `Dados da lista: ${list.name}`;
+        const body = `Olá,\n\nO arquivo CSV com os dados da lista "${list.name}" foi baixado.\n\nPor favor, anexe o arquivo "${list.name.replace(/ /g, '_')}.csv" da sua pasta de downloads a este e-mail antes de enviar.\n\nObrigado.`;
+        const mailtoLink = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        window.open(mailtoLink, '_blank');
+    }
+    
+    function sendWhatsApp(phone) {
+        const list = state.lists[state.currentListId];
+        const columnsWithTimestamp = ['Data', 'Hora', ...list.columns];
+
+        // 1. Download CSV
+        exportToCSV(list.name, columnsWithTimestamp, list.data);
+
+        // 2. Prepare and open WhatsApp link
+        const recipientName = list.recipientName ? `, ${list.recipientName}` : '';
+        const message = `Olá${recipientName}!\n\nO arquivo CSV com os dados da lista "${list.name}" acaba de ser baixado.\n\nPor favor, anexe o arquivo ao chat para enviá-lo.`;
+        const cleanPhone = phone.replace(/[^0-9]/g, ''); // Remove non-numeric chars
+        const whatsappLink = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+        window.open(whatsappLink, '_blank');
+    }
 
     // QR Preview Modal
     document.getElementById('confirm-qr-data-btn').addEventListener('click', () => {
@@ -256,8 +420,7 @@ function setupEventListeners() {
             renderTable(currentList.columns, currentList.data);
         } else {
             // For existing lists, or new lists with JSON QR, just add the data
-            currentList.data.push(dataArray);
-            renderTable(currentList.columns, currentList.data);
+            addDataToList(dataArray);
         }
 
         saveCurrentList();
@@ -269,7 +432,7 @@ function setupEventListeners() {
         hideAllModals();
         openEditColumnsModal();
     });
-    document.getElementById('define-cols-qr-btn').addEventListener('click', () => {
+    document.getElementById('define-cols-qr-btn')?.addEventListener('click', () => { // Made optional
         hideAllModals();
         showModal(modals.qrScanner);
         startScanner((data) => {
@@ -402,7 +565,8 @@ function setupEventListeners() {
             const list = state.lists[state.currentListId];
 
             if (list && list.data[rowIndex] && list.data[rowIndex][colIndex] !== undefined) {
-                list.data[rowIndex][colIndex] = cell.textContent;
+                // Adjust for hidden date & time columns. colIndex from UI maps to colIndex+2 in data array.
+                list.data[rowIndex][colIndex + 2] = cell.textContent;
                 saveCurrentList();
             }
         }

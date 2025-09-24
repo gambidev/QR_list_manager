@@ -35,8 +35,9 @@ export function renderTable(columns, data) {
         delCell.innerHTML = `<button class="row-del-btn" title="Remover linha" data-row-index="${rowIndex}">🗑️</button>`;
         
         // Ensure rowData has an entry for each column
+        // The first two elements of rowData are the hidden date and time, so we start data access from index 2
         for (let i = 0; i < columns.length; i++) {
-            const cellData = rowData[i] !== undefined ? rowData[i] : '';
+            const cellData = rowData[i + 2] !== undefined ? rowData[i + 2] : '';
             const cell = row.insertCell();
             cell.textContent = cellData;
             cell.setAttribute('contenteditable', 'true');
@@ -44,10 +45,11 @@ export function renderTable(columns, data) {
         }
 
         // If there is more data than columns, add an indicator
-        if (rowData.length > columns.length) {
+        // We subtract 2 from rowData.length to account for the date and time
+        if ((rowData.length - 2) > columns.length) {
             const extraCell = row.insertCell();
             extraCell.textContent = '...';
-            extraCell.title = `Dados extras: ${rowData.slice(columns.length).join(', ')}`;
+            extraCell.title = `Dados extras: ${rowData.slice(columns.length + 2).join(', ')}`;
         }
     });
 

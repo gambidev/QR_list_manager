@@ -1,8 +1,10 @@
 function convertToCSV(columns, data) {
     const header = columns.join(',');
     const rows = data.map(row => {
-        return columns.map((_, colIndex) => {
-            let cell = row[colIndex] === undefined ? '' : String(row[colIndex]);
+        // Assume row already includes timestamp if columns has it.
+        // We ensure data passed matches columns.
+        return row.map(cellValue => {
+            let cell = cellValue === undefined || cellValue === null ? '' : String(cellValue);
             // Escape quotes and handle commas
             if (cell.includes('"') || cell.includes(',')) {
                 cell = `"${cell.replace(/"/g, '""')}"`;
@@ -28,4 +30,3 @@ export function exportToCSV(listName, columns, data) {
     link.click();
     document.body.removeChild(link);
 }
-
