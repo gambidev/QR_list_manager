@@ -261,13 +261,16 @@ function setupEventListeners() {
             stopScanner();
             const previewContainer = document.getElementById('qr-data-preview');
             previewContainer.innerHTML = ''; // Clear previous preview
-
+            
+            // Tenta exibir como CSV (sempre) ou JSON (se aplicável) no Preview
             try {
+                // Tenta JSON para um preview mais organizado, se for um QR de terceiros
                 const jsonData = JSON.parse(data);
-                // It's a valid JSON
+                
+                // É um JSON
                 const pre = document.createElement('pre');
                 pre.textContent = data;
-                pre.className = 'hidden'; // Hide the raw data
+                pre.className = 'hidden'; 
                 previewContainer.appendChild(pre);
 
                 for (const [key, value] of Object.entries(jsonData)) {
@@ -278,10 +281,21 @@ function setupEventListeners() {
                 }
 
             } catch (e) {
-                // Not a JSON, treat as plain text
+                // Não é JSON, trata como CSV/Texto Simples
+                const dataArray = data.split(',').map(s => s.trim());
+                
+                // Exibe os campos de forma simples no Preview
                 const pre = document.createElement('pre');
                 pre.textContent = data;
+                pre.className = 'hidden'; 
                 previewContainer.appendChild(pre);
+                
+                dataArray.forEach((value, index) => {
+                    const entryDiv = document.createElement('div');
+                    entryDiv.className = 'qr-preview-item';
+                    entryDiv.innerHTML = `<span class="qr-preview-key">Valor ${index + 1}:</span> <span class="qr-preview-value">${value}</span>`;
+                    previewContainer.appendChild(entryDiv);
+                });
             }
 
             showModal(modals.qrPreview);
@@ -391,39 +405,53 @@ function setupEventListeners() {
         const rawDataPre = previewContainer.querySelector('pre');
         if (!rawDataPre) return;
 
-        const data = rawDataPre.textContent;
+        const data = rawDataPre.textContent.trim();
         const currentList = state.lists[state.currentListId];
         let dataArray;
         let isJson = false;
 
-        try {
-            const jsonData = JSON.parse(data);
-            dataArray = Object.values(jsonData);
-            isJson = true;
+        // 1. TENTAR PROCESSAR COMO CSV SIMPLES (NOSSO FORMATO PREFERENCIAL)
+        // Se a string não começar com '{', presumimos que é CSV.
+        if (!data.startsWith('{')) {
+            // Processa como CSV: separa por vírgulas e remove espaços.
+            dataArray = data.split(',').map(s => s.trim());
+        } else {
+            // 2. TENTAR PROCESSAR COMO JSON (FALLBACK)
+            try {
+                const jsonData = JSON.parse(data);
+                dataArray = Object.values(jsonData);
+                isJson = true;
+            } catch (e) {
+                // 3. SE FALHAR, TRATAR COMO CSV BRUTO
+                dataArray = data.split(',').map(s => s.trim());
+            }
+        }
+        
+        // 4. LÓGICA DE DEFINIÇÃO DE COLUNAS
 
-            // Special case: defining columns from JSON keys for a new list
-            if (currentList.columns.length === 0) {
-                const newColumns = Object.keys(jsonData);
+        if (currentList.columns.length === 0) {
+            // Se a lista é nova e não tem colunas
+            
+            if (isJson) {
+                // Se era JSON, usa as chaves do JSON como nomes das colunas
+                const newColumns = Object.keys(JSON.parse(data));
+                currentList.columns = newColumns;
+            } else {
+                // Se era CSV, cria colunas genéricas
+                const newColumns = dataArray.map((_, i) => `Campo ${i + 1}`);
                 currentList.columns = newColumns;
             }
-        } catch (e) {
-            // Fallback for non-JSON data
-            dataArray = data.split(',').map(s => s.trim());
-        }
+            
+            // Adiciona a primeira linha (que acabou de ser lida)
+            // Chamamos addDataToList que fará o timestamp e o salvamento
+            addDataToList(dataArray);
 
-        // Add data to the list
-        if (currentList.columns.length === 0 && !isJson) {
-            // For non-json QR on a new list, create generic columns
-            const newColumns = dataArray.map((_, i) => `Campo ${i + 1}`);
-            currentList.columns = newColumns;
-            currentList.data.push(dataArray);
-            renderTable(currentList.columns, currentList.data);
         } else {
-            // For existing lists, or new lists with JSON QR, just add the data
+            // Se a lista já tem colunas, apenas adiciona os dados
             addDataToList(dataArray);
         }
 
-        saveCurrentList();
+        // saveCurrentList() é chamado dentro de addDataToList.
         hideAllModals();
     });
 
@@ -432,20 +460,11 @@ function setupEventListeners() {
         hideAllModals();
         openEditColumnsModal();
     });
-    document.getElementById('define-cols-qr-btn')?.addEventListener('click', () => { // Made optional
+    // O botão 'define-cols-qr-btn' foi removido do HTML, mas o listener permanece por segurança.
+    document.getElementById('define-cols-qr-btn')?.addEventListener('click', () => { 
         hideAllModals();
-        showModal(modals.qrScanner);
-        startScanner((data) => {
-            stopScanner();
-            const dataArray = data.split(',').map(s => s.trim());
-            const newColumns = dataArray.map((_, i) => `Campo ${i + 1}`);
-            const currentList = state.lists[state.currentListId];
-            currentList.columns = newColumns;
-            currentList.data.push(dataArray);
-            saveCurrentList();
-            hideAllModals();
-            renderTable(currentList.columns, currentList.data);
-        });
+        // A lógica de definir colunas por QR é agora tratada pelo fluxo principal (read-qr-btn)
+        alert('Use o botão "Ler QR" para ler o QR e definir colunas automaticamente.');
     });
 
     // Edit Columns
@@ -501,21 +520,28 @@ function setupEventListeners() {
         const list = state.lists[state.currentListId];
         const form = document.getElementById('manual-add-form');
         form.innerHTML = '';
-        list.columns.forEach((col, i) => {
-            const div = document.createElement('div');
-            div.className = 'manual-add-item';
-            div.innerHTML = `
-                <label for="manual-input-${i}">${col}</label>
-                <input type="text" id="manual-input-${i}" data-col-name="${col}">
-            `;
-            form.appendChild(div);
-        });
+        if (list.columns.length === 0) {
+            form.innerHTML = '<p>Você precisa definir as colunas antes de adicionar dados manualmente. Edite as colunas ou leia um QR Code.</p>';
+            document.getElementById('confirm-manual-add-btn').style.display = 'none';
+        } else {
+            list.columns.forEach((col, i) => {
+                const div = document.createElement('div');
+                div.className = 'manual-add-item';
+                div.innerHTML = `
+                    <label for="manual-input-${i}">${col}</label>
+                    <input type="text" id="manual-input-${i}" data-col-name="${col}">
+                `;
+                form.appendChild(div);
+            });
+            document.getElementById('confirm-manual-add-btn').style.display = 'block';
+        }
         showModal(modals.addManual);
     });
 
     document.getElementById('confirm-manual-add-btn').addEventListener('click', () => {
         const inputs = document.querySelectorAll('#manual-add-form input');
-        const newRow = Array.from(inputs).map(input => input.value);
+        // Pega o valor do input, removendo espaços, mas mantendo a string vazia se o campo for opcional
+        const newRow = Array.from(inputs).map(input => input.value.trim()); 
         addDataToList(newRow);
         hideAllModals();
     });
