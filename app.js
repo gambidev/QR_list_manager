@@ -101,7 +101,9 @@ function openList(listId) {
     if (list.columns.length === 0) {
         showModal(modals.defineCols);
     } else {
-        renderTable(list.columns, list.data);
+        renderTable(list.columns, list.data, {
+            isSent: (key) => new Set(list.sentKeys || []).has(key)
+        });
     }
 }
 
@@ -109,37 +111,70 @@ function saveCurrentList() {
     if (!state.currentListId) return;
     const list = state.lists[state.currentListId];
     list.modifiedAt = new Date().toISOString();
+    list.sentKeys = Array.from(new Set(list.sentKeys || []));
     saveState();
 }
 
-async function sendToGoogleSheets(dataArray) {
+async function sendToGoogleSheets(dataArray, rowKey) {
     if (!state.currentListId) return;
     const list = state.lists[state.currentListId];
-    if (!list.googleSheetUrl) return;
+    if (!list.googleSheetUrl) {
+        document.getElementById('last-scan-status').textContent = `Sem URL do Google Sheets configurada.`;
+        return;
+    }
 
-    // Create a JSON object from column headers and new row data
     const payload = {};
     list.columns.forEach((col, index) => {
         payload[col] = dataArray[index] !== undefined ? dataArray[index] : '';
     });
 
     try {
-        const response = await fetch(list.googleSheetUrl, {
+        const res = await fetch(list.googleSheetUrl, {
             method: 'POST',
-            mode: 'no-cors', // Important for simple Apps Script web apps
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                timestamp: new Date().toISOString(),
-                data: payload
-            })
+            mode: 'cors', // require CORS so we can detect failure
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ timestamp: new Date().toISOString(), data: payload })
         });
-        console.log('Data sent to Google Sheets.');
+
+        // Only mark as sent if we have a successful HTTP response
+        if (!res.ok) {
+            document.getElementById('last-scan-status').textContent = `Falha ao enviar (HTTP ${res.status}).`;
+            return;
+        }
+
+        // Try to read response (optional success flag handling)
+        let ok = true;
+        try {
+            const ct = res.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+                const json = await res.json();
+                ok = json.success !== false; // treat explicit success=false as failure
+            } else {
+                const text = await res.text();
+                // If Apps Script returns specific failure text, treat as failure
+                if (text.toLowerCase().includes('error') || text.toLowerCase().includes('fail')) ok = false;
+            }
+        } catch {
+            // If parsing fails but HTTP ok, assume success
+            ok = true;
+        }
+
+        if (!ok) {
+            document.getElementById('last-scan-status').textContent = `Falha ao enviar (resposta do servidor).`;
+            return;
+        }
+
+        const set = new Set(list.sentKeys || []);
+        if (rowKey) set.add(rowKey);
+        list.sentKeys = Array.from(set);
+
+        renderTable(list.columns, list.data, { isSent: (k) => new Set(list.sentKeys || []).has(k) });
+        document.getElementById('last-scan-status').textContent = `Linha enviada à planilha.`;
+        saveCurrentList();
     } catch (error) {
         console.error('Error sending data to Google Sheets:', error);
-        // Optionally, inform the user of the failure
-        document.getElementById('last-scan-status').textContent = `Erro ao enviar para o Google Sheets!`;
+        document.getElementById('last-scan-status').textContent = `Erro de rede ao enviar para o Google Sheets.`;
+        // Do not mark as sent on error
     }
 }
 
@@ -153,11 +188,10 @@ function addDataToList(dataArray) {
     const rowWithTimestamp = [date, time, ...dataArray];
 
     list.data.push(rowWithTimestamp);
-    renderTable(list.columns, list.data);
+    renderTable(list.columns, list.data, { isSent: (k) => new Set(list.sentKeys || []).has(k) });
     saveCurrentList();
-
-    // Send to Google Sheets if configured (without timestamp)
-    sendToGoogleSheets(dataArray);
+    const rowKey = `${date}T${time}`;
+    sendToGoogleSheets(dataArray, rowKey);
 
     const statusText = Array.isArray(dataArray) ? dataArray.join(', ') : dataArray;
     document.getElementById('last-scan-status').textContent = `Última leitura: ${statusText.substring(0, 30)}...`;
@@ -259,45 +293,36 @@ function setupEventListeners() {
         showModal(modals.qrScanner);
         startScanner((data) => {
             stopScanner();
-            const previewContainer = document.getElementById('qr-data-preview');
-            previewContainer.innerHTML = ''; // Clear previous preview
-            
-            // Tenta exibir como CSV (sempre) ou JSON (se aplicável) no Preview
+            const preview = document.getElementById('qr-data-preview');
+            preview.innerHTML = '';
+            const currentList = state.lists[state.currentListId];
             try {
-                // Tenta JSON para um preview mais organizado, se for um QR de terceiros
-                const jsonData = JSON.parse(data);
-                
-                // É um JSON
-                const pre = document.createElement('pre');
-                pre.textContent = data;
-                pre.className = 'hidden'; 
-                previewContainer.appendChild(pre);
-
-                for (const [key, value] of Object.entries(jsonData)) {
-                    const entryDiv = document.createElement('div');
-                    entryDiv.className = 'qr-preview-item';
-                    entryDiv.innerHTML = `<span class="qr-preview-key">${key}:</span> <span class="qr-preview-value">${value}</span>`;
-                    previewContainer.appendChild(entryDiv);
-                }
-
-            } catch (e) {
-                // Não é JSON, trata como CSV/Texto Simples
-                const dataArray = data.split(',').map(s => s.trim());
-                
-                // Exibe os campos de forma simples no Preview
-                const pre = document.createElement('pre');
-                pre.textContent = data;
-                pre.className = 'hidden'; 
-                previewContainer.appendChild(pre);
-                
-                dataArray.forEach((value, index) => {
-                    const entryDiv = document.createElement('div');
-                    entryDiv.className = 'qr-preview-item';
-                    entryDiv.innerHTML = `<span class="qr-preview-key">Valor ${index + 1}:</span> <span class="qr-preview-value">${value}</span>`;
-                    previewContainer.appendChild(entryDiv);
+                const obj = JSON.parse(data);
+                const cols = (currentList && currentList.columns.length > 0) ? currentList.columns : Object.keys(obj);
+                cols.forEach(col => {
+                    const row = document.createElement('div');
+                    row.className = 'qr-edit-row';
+                    const val = (obj && typeof obj === 'object') ? (obj[col] ?? '') : '';
+                    row.innerHTML = `<input class="qr-key" type="text" value="${col}"> <input class="qr-value" type="text" value="${val}">`;
+                    preview.appendChild(row);
                 });
+            } catch {
+                // Handle CSV (comma-separated) data: split into values and map to existing columns or create campoN
+                const raw = String(data);
+                const values = raw.split(',').map(s => s.trim());
+                const colsExisting = (currentList && currentList.columns.length > 0)
+                    ? currentList.columns
+                    : values.map((_, i) => `campo${i + 1}`);
+                const maxLen = Math.max(colsExisting.length, values.length);
+                for (let i = 0; i < maxLen; i++) {
+                    const colName = colsExisting[i] ?? `campo${i + 1}`;
+                    const val = values[i] ?? '';
+                    const row = document.createElement('div');
+                    row.className = 'qr-edit-row';
+                    row.innerHTML = `<input class="qr-key" type="text" value="${colName}"> <input class="qr-value" type="text" value="${val}">`;
+                    preview.appendChild(row);
+                }
             }
-
             showModal(modals.qrPreview);
         });
     });
@@ -401,57 +426,25 @@ function setupEventListeners() {
 
     // QR Preview Modal
     document.getElementById('confirm-qr-data-btn').addEventListener('click', () => {
-        const previewContainer = document.getElementById('qr-data-preview');
-        const rawDataPre = previewContainer.querySelector('pre');
-        if (!rawDataPre) return;
-
-        const data = rawDataPre.textContent.trim();
+        const preview = document.getElementById('qr-data-preview');
+        const rows = Array.from(preview.querySelectorAll('.qr-edit-row'));
+        const kvs = rows.map(r => ({
+            k: r.querySelector('.qr-key').value.trim(),
+            v: r.querySelector('.qr-value').value
+        })).filter(p => p.k);
         const currentList = state.lists[state.currentListId];
-        let dataArray;
-        let isJson = false;
-
-        // 1. TENTAR PROCESSAR COMO CSV SIMPLES (NOSSO FORMATO PREFERENCIAL)
-        // Se a string não começar com '{', presumimos que é CSV.
-        if (!data.startsWith('{')) {
-            // Processa como CSV: separa por vírgulas e remove espaços.
-            dataArray = data.split(',').map(s => s.trim());
-        } else {
-            // 2. TENTAR PROCESSAR COMO JSON (FALLBACK)
-            try {
-                const jsonData = JSON.parse(data);
-                dataArray = Object.values(jsonData);
-                isJson = true;
-            } catch (e) {
-                // 3. SE FALHAR, TRATAR COMO CSV BRUTO
-                dataArray = data.split(',').map(s => s.trim());
-            }
-        }
-        
-        // 4. LÓGICA DE DEFINIÇÃO DE COLUNAS
-
+        if (!currentList) return;
         if (currentList.columns.length === 0) {
-            // Se a lista é nova e não tem colunas
-            
-            if (isJson) {
-                // Se era JSON, usa as chaves do JSON como nomes das colunas
-                const newColumns = Object.keys(JSON.parse(data));
-                currentList.columns = newColumns;
-            } else {
-                // Se era CSV, cria colunas genéricas
-                const newColumns = dataArray.map((_, i) => `Campo ${i + 1}`);
-                currentList.columns = newColumns;
-            }
-            
-            // Adiciona a primeira linha (que acabou de ser lida)
-            // Chamamos addDataToList que fará o timestamp e o salvamento
-            addDataToList(dataArray);
-
+            currentList.columns = kvs.map(p => p.k);
         } else {
-            // Se a lista já tem colunas, apenas adiciona os dados
-            addDataToList(dataArray);
+            kvs.forEach(p => { if (!currentList.columns.includes(p.k)) currentList.columns.push(p.k); });
         }
-
-        // saveCurrentList() é chamado dentro de addDataToList.
+        const values = currentList.columns.map(col => {
+            const found = kvs.find(p => p.k === col);
+            return found ? found.v : '';
+        });
+        addDataToList(values);
+        saveCurrentList();
         hideAllModals();
     });
 
@@ -460,15 +453,25 @@ function setupEventListeners() {
         hideAllModals();
         openEditColumnsModal();
     });
-    // O botão 'define-cols-qr-btn' foi removido do HTML, mas o listener permanece por segurança.
-    document.getElementById('define-cols-qr-btn')?.addEventListener('click', () => { 
+    document.getElementById('define-cols-qr-btn')?.addEventListener('click', () => { // Made optional
         hideAllModals();
-        // A lógica de definir colunas por QR é agora tratada pelo fluxo principal (read-qr-btn)
-        alert('Use o botão "Ler QR" para ler o QR e definir colunas automaticamente.');
+        showModal(modals.qrScanner);
+        startScanner((data) => {
+            stopScanner();
+            const dataArray = data.split(',').map(s => s.trim());
+            const newColumns = dataArray.map((_, i) => `Campo ${i + 1}`);
+            const currentList = state.lists[state.currentListId];
+            currentList.columns = newColumns;
+            currentList.data.push(dataArray);
+            saveCurrentList();
+            hideAllModals();
+            renderTable(currentList.columns, currentList.data);
+        });
     });
 
     // Edit Columns
-    document.getElementById('edit-columns-btn').addEventListener('click', openEditColumnsModal);
+    const editColsBtn = document.getElementById('edit-columns-btn');
+    if (editColsBtn) editColsBtn.addEventListener('click', openEditColumnsModal);
 
     function openEditColumnsModal() {
         const list = state.lists[state.currentListId];
@@ -520,28 +523,21 @@ function setupEventListeners() {
         const list = state.lists[state.currentListId];
         const form = document.getElementById('manual-add-form');
         form.innerHTML = '';
-        if (list.columns.length === 0) {
-            form.innerHTML = '<p>Você precisa definir as colunas antes de adicionar dados manualmente. Edite as colunas ou leia um QR Code.</p>';
-            document.getElementById('confirm-manual-add-btn').style.display = 'none';
-        } else {
-            list.columns.forEach((col, i) => {
-                const div = document.createElement('div');
-                div.className = 'manual-add-item';
-                div.innerHTML = `
-                    <label for="manual-input-${i}">${col}</label>
-                    <input type="text" id="manual-input-${i}" data-col-name="${col}">
-                `;
-                form.appendChild(div);
-            });
-            document.getElementById('confirm-manual-add-btn').style.display = 'block';
-        }
+        list.columns.forEach((col, i) => {
+            const div = document.createElement('div');
+            div.className = 'manual-add-item';
+            div.innerHTML = `
+                <label for="manual-input-${i}">${col}</label>
+                <input type="text" id="manual-input-${i}" data-col-name="${col}">
+            `;
+            form.appendChild(div);
+        });
         showModal(modals.addManual);
     });
 
     document.getElementById('confirm-manual-add-btn').addEventListener('click', () => {
         const inputs = document.querySelectorAll('#manual-add-form input');
-        // Pega o valor do input, removendo espaços, mas mantendo a string vazia se o campo for opcional
-        const newRow = Array.from(inputs).map(input => input.value.trim()); 
+        const newRow = Array.from(inputs).map(input => input.value);
         addDataToList(newRow);
         hideAllModals();
     });
@@ -554,17 +550,32 @@ function setupEventListeners() {
             pendingDelete.rowIndex = idx;
             showModal(modals.confirmDeleteRow);
         }
+        const sendBtn = e.target.closest('.row-send-btn');
+        if (sendBtn) {
+            const idx = parseInt(sendBtn.dataset.rowIndex, 10);
+            const list = state.lists[state.currentListId];
+            if (!list) return;
+            const row = list.data[idx];
+            const rowKey = `${row[0]}T${row[1]}`;
+            const values = list.columns.map((_, i) => row[i + 2] || '');
+            sendToGoogleSheets(values, rowKey);
+        }
     });
 
     // Wire confirm/cancel delete modal
     document.getElementById('confirm-delete-row-btn').addEventListener('click', () => {
         const list = state.lists[state.currentListId];
         if (!list || pendingDelete.rowIndex === null) return;
-        // remove the row from data
+        const row = list.data[pendingDelete.rowIndex];
+        const key = `${row[0]}T${row[1]}`;
+        if (list.sentKeys) {
+            const set = new Set(list.sentKeys);
+            set.delete(key);
+            list.sentKeys = Array.from(set);
+        }
         list.data.splice(pendingDelete.rowIndex, 1);
-        // persist and re-render
         saveCurrentList();
-        renderTable(list.columns, list.data);
+        renderTable(list.columns, list.data, { isSent: (k) => new Set(list.sentKeys || []).has(k) });
         pendingDelete.rowIndex = null;
         hideAllModals();
     });
@@ -597,11 +608,37 @@ function setupEventListeners() {
             }
         }
     }, true);
+
+    document.getElementById('qr-preview-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'add-qr-field-btn') {
+            const preview = document.getElementById('qr-data-preview');
+            const row = document.createElement('div');
+            row.className = 'qr-edit-row';
+            row.innerHTML = `<input class="qr-key" type="text" placeholder="Novo campo"> <input class="qr-value" type="text" placeholder="Valor">`;
+            preview.appendChild(row);
+        }
+    });
+
+    document.getElementById('send-pending-btn').addEventListener('click', async () => {
+        const list = state.lists[state.currentListId];
+        if (!list) return;
+        const sentSet = new Set(list.sentKeys || []);
+        for (let i = 0; i < list.data.length; i++) {
+            const row = list.data[i];
+            const key = `${row[0]}T${row[1]}`;
+            if (!sentSet.has(key)) {
+                const values = list.columns.map((_, idx) => row[idx + 2] || '');
+                await sendToGoogleSheets(values, key);
+            }
+        }
+    });
 }
 
 // --- INITIALIZATION ---
 function init() {
     loadState();
+    // ensure lists have sentKeys field
+    Object.values(state.lists).forEach(list => { if (!list.sentKeys) list.sentKeys = []; });
     renderHomeScreen();
     setupEventListeners();
 }

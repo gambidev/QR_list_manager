@@ -215,6 +215,9 @@ tr:hover {
     background-color: rgba(0,0,0,0.06);
 }
 
+.row-status-cell { width: 100px; text-align: center; padding: 8px 10px; }
+.row-send-btn { background: transparent; border: 1px solid var(--border-color); padding: 6px 10px; border-radius: 6px; cursor: pointer; }
+
 /* --- Settings Form --- */
 .settings-form-group {
     display: grid;

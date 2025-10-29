@@ -1,6 +1,6 @@
 const tableContainer = document.getElementById('table-container');
 
-export function renderTable(columns, data) {
+export function renderTable(columns, data, options = {}) {
     clearTable();
     if (!columns || columns.length === 0) {
         tableContainer.innerHTML = '<p>Nenhuma coluna definida para esta lista.</p>';
@@ -17,6 +17,9 @@ export function renderTable(columns, data) {
     const thDel = document.createElement('th');
     thDel.style.width = '40px';
     headerRow.appendChild(thDel);
+    const thStatus = document.createElement('th');
+    thStatus.textContent = 'Status';
+    headerRow.appendChild(thStatus);
     columns.forEach(colName => {
         const th = document.createElement('th');
         th.textContent = colName;
@@ -36,6 +39,12 @@ export function renderTable(columns, data) {
         
         // Ensure rowData has an entry for each column
         // The first two elements of rowData are the hidden date and time, so we start data access from index 2
+        const statusCell = row.insertCell();
+        statusCell.className = 'row-status-cell';
+        const rowKey = `${rowData[0]}T${rowData[1]}`;
+        const sent = options.isSent ? options.isSent(rowKey) : false;
+        statusCell.innerHTML = sent ? '☁️' : `<button class="row-send-btn" data-row-index="${rowIndex}">Enviar</button>`;
+        
         for (let i = 0; i < columns.length; i++) {
             const cellData = rowData[i + 2] !== undefined ? rowData[i + 2] : '';
             const cell = row.insertCell();
