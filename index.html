@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR List Manager</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap">
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+</head>
+<body>
+
+    <!-- Main Application Container -->
+    <div id="app-container">
+
+        <!-- Home Screen: Displays all lists -->
+        <div id="home-screen" class="screen active">
+            <header class="app-header">
+                <h1>QR List Manager</h1>
+                <button id="create-new-list-btn" class="btn btn-primary">Criar nova lista</button>
+            </header>
+            <main>
+                <h2>Minhas Listas</h2>
+                <div id="list-container">
+                    <!-- Lists will be dynamically inserted here -->
+                </div>
+            </main>
+        </div>
+
+        <!-- List View Screen: Displays the content of a single list -->
+        <div id="list-view-screen" class="screen">
+            <header class="list-header">
+                <button id="back-to-home-btn" class="btn">&larr; Voltar</button>
+                <h2 id="list-name-display" contenteditable="true"></h2>
+                <div class="header-actions">
+                    <button id="export-csv-btn" class="btn" title="Exportar CSV">📥 Exportar CSV</button>
+                    <button id="send-email-btn" class="btn" title="Enviar por E-mail">📧 Enviar por E-mail</button>
+                    <button id="send-whatsapp-btn" class="btn" title="Enviar por WhatsApp">💬 Enviar por WhatsApp</button>
+                    <button id="list-settings-btn" class="btn" title="Configurações da Lista">⚙️</button>
+                </div>
+            </header>
+            <main>
+                <div class="list-actions">
+                    <button id="read-qr-btn" class="btn btn-primary">Ler QR</button>
+                    <button id="add-manual-btn" class="btn">Adicionar manualmente</button>
+                    <button id="edit-columns-btn" class="btn">Editar colunas</button>
+                </div>
+                <div id="status-bar">
+                    <span id="row-count">Linhas: 0</span>
+                    <span id="last-scan-status"></span>
+                </div>
+                <div id="table-container">
+                    <!-- Table will be dynamically inserted here -->
+                </div>
+            </main>
+        </div>
+
+    </div>
+
+    <!-- Modals -->
+    <div id="modal-backdrop" class="hidden"></div>
+
+    <!-- Modal: Create New List -->
+    <div id="new-list-modal" class="modal hidden">
+        <h3>Criar Nova Lista</h3>
+        <input type="text" id="new-list-name-input" placeholder="Nome da lista">
+        <div class="modal-actions">
+            <button id="cancel-new-list-btn" class="btn btn-secondary">Cancelar</button>
+            <button id="confirm-new-list-btn" class="btn btn-primary">Criar</button>
+        </div>
+    </div>
+
+    <!-- Modal: Define Columns for a New List -->
+    <div id="define-columns-modal" class="modal hidden">
+        <h3>Defina os campos da sua lista</h3>
+        <p>Sua lista ainda não tem colunas. Clique abaixo para defini-las manualmente e começar a adicionar dados.</p>
+        <div class="modal-actions">
+            <button id="define-cols-manual-btn" class="btn btn-primary">Definir campos manualmente</button>
+        </div>
+    </div>
+    
+    <!-- Modal: Edit Columns -->
+    <div id="edit-columns-modal" class="modal hidden wide">
+        <h3>Editar Colunas</h3>
+        <div id="edit-columns-container">
+            <!-- Column inputs will be dynamically inserted here -->
+        </div>
+        <button id="add-column-btn" class="btn btn-secondary">+ Adicionar Coluna</button>
+        <hr>
+        <div class="modal-actions">
+            <button id="cancel-edit-cols-btn" class="btn btn-secondary">Cancelar</button>
+            <button id="save-edit-cols-btn" class="btn btn-primary">Salvar</button>
+        </div>
+    </div>
+
+    <!-- Modal: Add Row Manually -->
+    <div id="add-manual-modal" class="modal hidden wide">
+        <h3>Adicionar Linha Manualmente</h3>
+        <div id="manual-add-form">
+            <!-- Form inputs will be dynamically inserted here -->
+        </div>
+        <div class="modal-actions">
+            <button id="cancel-manual-add-btn" class="btn btn-secondary">Cancelar</button>
+            <button id="confirm-manual-add-btn" class="btn btn-primary">Adicionar Linha</button>
+        </div>
+    </div>
+
+    <!-- Modal: QR Scanner -->
+    <div id="qr-scanner-modal" class="modal hidden fullscreen">
+         <div class="qr-header">
+            <h3>Aponte a câmera para o QR Code</h3>
+            <button id="close-qr-scanner-btn" class="btn btn-secondary">&times;</button>
+        </div>
+        <div class="qr-video-container">
+            <video id="qr-video" playsinline></video>
+            <div class="qr-scan-box"></div>
+        </div>
+        <canvas id="qr-canvas" class="hidden"></canvas>
+        <div class="qr-footer">
+            <p>ou</p>
+            <input type="file" id="qr-file-input" accept="image/*" class="hidden">
+            <label for="qr-file-input" class="btn">Carregar Imagem</label>
+        </div>
+    </div>
+    
+    <!-- Modal: QR Data Preview -->
+    <div id="qr-preview-modal" class="modal hidden">
+        <h3>Dados Lidos do QR</h3>
+        <div id="qr-data-preview"></div>
+        <div class="modal-actions">
+            <button id="cancel-qr-data-btn" class="btn btn-secondary">Cancelar</button>
+            <button id="confirm-qr-data-btn" class="btn btn-primary">Confirmar</button>
+        </div>
+    </div>
+
+    <!-- Modal: Confirm Row Deletion -->
+    <div id="confirm-delete-row-modal" class="modal hidden">
+        <h3>Tem certeza?</h3>
+        <p>Tem certeza de que deseja remover esta linha?</p>
+        <div class="modal-actions">
+            <button id="cancel-delete-row-btn" class="btn btn-secondary">Cancelar</button>
+            <button id="confirm-delete-row-btn" class="btn btn-danger">Remover</button>
+        </div>
+    </div>
+
+    <!-- Modal: List Settings -->
+    <div id="list-settings-modal" class="modal hidden wide">
+        <h3>Configurações da Lista</h3>
+        <h4>Contato do Destinatário (Opcional)</h4>
+        <div class="settings-form-group">
+            <label for="recipient-name">Nome:</label>
+            <input type="text" id="recipient-name" placeholder="Nome do destinatário">
+        </div>
+        <div class="settings-form-group">
+            <label for="recipient-email">E-mail:</label>
+            <input type="email" id="recipient-email" placeholder="email@exemplo.com">
+        </div>
+        <div class="settings-form-group">
+            <label for="recipient-phone">Nº de Telefone (WhatsApp):</label>
+            <input type="tel" id="recipient-phone" placeholder="5511999998888">
+        </div>
+        <hr>
+        <h4>Integração Google Sheets (Opcional)</h4>
+        <div class="settings-form-group">
+            <label for="google-sheet-url">URL do Web App:</label>
+            <input type="url" id="google-sheet-url" placeholder="https://script.google.com/macros/s/...">
+        </div>
+        <div class="modal-actions">
+            <button id="cancel-list-settings-btn" class="btn btn-secondary">Cancelar</button>
+            <button id="save-list-settings-btn" class="btn btn-primary">Salvar</button>
+        </div>
+    </div>
+
+    <!-- Modal: Prompt for Email -->
+    <div id="prompt-email-modal" class="modal hidden">
+        <h3>E-mail do Destinatário</h3>
+        <p>Por favor, insira o e-mail para envio.</p>
+        <input type="email" id="prompt-email-input" placeholder="email@exemplo.com">
+        <div class="modal-actions">
+            <button id="cancel-prompt-email-btn" class="btn btn-secondary">Cancelar</button>
+            <button id="confirm-prompt-email-btn" class="btn btn-primary">Enviar</button>
+        </div>
+    </div>
+
+    <!-- Modal: Prompt for Phone -->
+    <div id="prompt-phone-modal" class="modal hidden">
+        <h3>Nº de WhatsApp do Destinatário</h3>
+        <p>Insira o número com código do país (Ex: 55119...)</p>
+        <input type="tel" id="prompt-phone-input" placeholder="5511999998888">
+        <div class="modal-actions">
+            <button id="cancel-prompt-phone-btn" class="btn btn-secondary">Cancelar</button>
+            <button id="confirm-prompt-phone-btn" class="btn btn-primary">Enviar</button>
+        </div>
+    </div>
+
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>
